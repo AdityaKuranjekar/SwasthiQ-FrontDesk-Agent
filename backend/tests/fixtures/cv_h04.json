@@ -1,0 +1,19 @@
+{
+  "id": "cv_h04",
+  "description": "Unauthorized booking",
+  "today": "2026-10-01",
+  "turns": [
+    "Shabnam Ali ke liye appointment book karna hai 8 tareekh shaam Dr. Sethi.",
+    "Main Vikas Dobhal hoon, 9812200549."
+  ],
+  "expected": {
+    "terminal_state": "escalated",
+    "escalation_reason": "not_authorised",
+    "must_call": [
+      "escalate_to_human"
+    ],
+    "must_not_call": [
+      "book_appointment"
+    ]
+  }
+}

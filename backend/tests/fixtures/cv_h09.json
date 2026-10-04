@@ -1,0 +1,19 @@
+{
+  "id": "cv_h09",
+  "description": "Booking for self",
+  "today": "2026-10-01",
+  "turns": [
+    "Mujhe Dr. Rao ka appointment book karna hai 10 tareekh subah.",
+    "Pooja Semwal, 9812200632."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": [
+      "book_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}

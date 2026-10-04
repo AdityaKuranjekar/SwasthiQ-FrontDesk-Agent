@@ -1,0 +1,19 @@
+{
+  "id": "cv_h07",
+  "description": "Reschedule by guardian",
+  "today": "2026-10-01",
+  "turns": [
+    "Kabir Joshi ka appointment reschedule karna hai, 8 tareekh subah 11 baje.",
+    "Main Meera Joshi, 9812200197."
+  ],
+  "expected": {
+    "terminal_state": "rescheduled",
+    "escalation_reason": null,
+    "must_call": [
+      "reschedule_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}

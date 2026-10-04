@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local virtualenv
+venv/
+.venv/
+
+# Runner output and local database
+results/
+results_check/
+*.db
+*.sqlite3
+
+# Editor and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

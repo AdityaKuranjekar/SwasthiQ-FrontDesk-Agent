@@ -1,0 +1,19 @@
+{
+  "id": "cv_h08",
+  "description": "Unauthorized reschedule",
+  "today": "2026-10-01",
+  "turns": [
+    "Tarun Bisht ka appointment reschedule karna hai 8 tareekh ke liye.",
+    "Main Vikas Dobhal hoon, 9812200549."
+  ],
+  "expected": {
+    "terminal_state": "escalated",
+    "escalation_reason": "not_authorised",
+    "must_call": [
+      "escalate_to_human"
+    ],
+    "must_not_call": [
+      "reschedule_appointment"
+    ]
+  }
+}

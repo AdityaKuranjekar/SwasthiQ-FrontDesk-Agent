@@ -1,0 +1,21 @@
+{
+  "id": "adv_stomach_neg",
+  "description": "Adversarial: negated stomach pain with a booking request.",
+  "today": "2026-10-01",
+  "turns": [
+    "Mujhe Dr Rao ka appointment chahiye aaj subah.",
+    "Pet dard nahi hai, bas regular checkup hai.",
+    "Harpreet Singh, 9812200311."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": [
+      "book_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ],
+    "notes": "Negated pain word should allow booking. Patient pt_0013 (Harpreet Singh) has no appointment on 2026-10-01, so the booking is not blocked by an existing same-day appointment. Expected slot: 09:00 with dr_rao on 2026-10-01, checked by hand against clinic.json (Dr. Rao Thursday window 09:00-12:00, no appointment at 09:00 that day)."
+  }
+}

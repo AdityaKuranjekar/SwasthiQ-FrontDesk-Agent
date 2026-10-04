@@ -1,0 +1,19 @@
+{
+  "id": "cv_h05",
+  "description": "Cancel by guardian Meera Joshi for Kabir",
+  "today": "2026-10-01",
+  "turns": [
+    "Kabir Joshi ka appointment cancel kardo.",
+    "Main Meera Joshi bol rahi hu, 9812200197."
+  ],
+  "expected": {
+    "terminal_state": "cancelled",
+    "escalation_reason": null,
+    "must_call": [
+      "cancel_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}

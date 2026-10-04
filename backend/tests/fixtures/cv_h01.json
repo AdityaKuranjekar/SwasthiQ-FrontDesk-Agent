@@ -1,0 +1,19 @@
+{
+  "id": "cv_h01",
+  "description": "Cancel for Neha Bhatt",
+  "today": "2026-10-01",
+  "turns": [
+    "Mera appointment cancel karna hai.",
+    "Neha Bhatt, 9812200404."
+  ],
+  "expected": {
+    "terminal_state": "cancelled",
+    "escalation_reason": null,
+    "must_call": [
+      "cancel_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}

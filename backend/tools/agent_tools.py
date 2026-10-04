@@ -109,6 +109,15 @@ def _check_authority(conn, actor_patient_id: str, target_patient_id: str) -> boo
     guardians = json.loads(row["guardian_of_json"])
     return target_patient_id in guardians
 
+def list_patient_appointments(conn, patient_id: str, date: Optional[str] = None) -> list:
+    c = conn.cursor()
+    if date:
+        c.execute("SELECT * FROM appointments WHERE patient_id = ? AND date = ? AND status = 'booked'", (patient_id, date))
+    else:
+        c.execute("SELECT * FROM appointments WHERE patient_id = ? AND status = 'booked'", (patient_id,))
+    rows = c.fetchall()
+    return [{"id": r["id"], "doctor_id": r["doctor_id"], "date": r["date"], "start": r["start"]} for r in rows]
+
 def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, doctor_id: str, date: str, start: str) -> Dict[str, Any]:
     # 1. Malformed input
     try:
@@ -127,27 +136,36 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
     if slot_error:
         return slot_error
 
-    # 2. Existence
-    c = conn.cursor()
-    c.execute("SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND start = ? AND status = 'booked'", (doctor_id, date, start))
-    if c.fetchone():
-        return _error("slot_unavailable", "start")
-        
-    # 3. Authority
-    if not _check_authority(conn, actor_patient_id, patient_id):
-        return _error("unauthorised_actor", "actor_patient_id")
-        
-    ap_id = "ap_" + uuid.uuid4().hex[:8]
-    # start + 15 mins
-    h, m = map(int, start.split(":"))
-    end_m = h * 60 + m + 15
-    end = f"{end_m // 60:02d}:{end_m % 60:02d}"
-    
+    import sqlite3
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        c = conn.cursor()
+        
+        # 2. Existence
+        c.execute("SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND start = ? AND status = 'booked'", (doctor_id, date, start))
+        if c.fetchone():
+            conn.rollback()
+            return _error("slot_unavailable", "start")
+            
+        # 3. Authority
+        if not _check_authority(conn, actor_patient_id, patient_id):
+            conn.rollback()
+            return _error("unauthorised_actor", "actor_patient_id")
+            
+        ap_id = "ap_" + uuid.uuid4().hex[:8]
+        # start + 15 mins
+        h, m = map(int, start.split(":"))
+        end_m = h * 60 + m + 15
+        end = f"{end_m // 60:02d}:{end_m % 60:02d}"
+        
         c.execute("INSERT INTO appointments (id, patient_id, doctor_id, date, start, end, status) VALUES (?, ?, ?, ?, ?, ?, 'booked')",
                   (ap_id, patient_id, doctor_id, date, start, end))
         conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return _error("slot_unavailable", "start")
     except Exception:
+        conn.rollback()
         return _error("slot_unavailable", "start")
         
     return {"ok": True, "appointment_id": ap_id}
@@ -182,44 +200,61 @@ def reschedule_appointment(conn, clinic_data, actor_patient_id: str, appointment
     if start[-3:] not in [":00", ":15", ":30", ":45"]:
         return _error("not_on_slot_grid", "start")
         
-    c = conn.cursor()
-    c.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,))
-    row = c.fetchone()
+    import sqlite3
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        c = conn.cursor()
+        
+        c.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,))
+        row = c.fetchone()
+        
+        if not row:
+            conn.rollback()
+            return _error("unknown_appointment", "appointment_id")
+            
+        if row["status"] != "booked":
+            conn.rollback()
+            return _error("already_cancelled", "appointment_id")
+            
+        tgt_doctor = doctor_id if doctor_id else row["doctor_id"]
+        if tgt_doctor not in clinic_data.doctors:
+            conn.rollback()
+            return _error("unknown_doctor", "doctor_id")
+            
+        # Same slot check
+        if row["date"] == date and row["start"] == start and row["doctor_id"] == tgt_doctor:
+            conn.rollback()
+            return _error("same_slot", "start")
+            
+        # Authority
+        if not _check_authority(conn, actor_patient_id, row["patient_id"]):
+            conn.rollback()
+            return _error("unauthorised_actor", "actor_patient_id")
+            
+        # The target must be a real slot for that doctor: open day, not on leave, inside a window
+        slot_error = _target_slot_error(clinic_data, tgt_doctor, date, start)
+        if slot_error:
+            conn.rollback()
+            return slot_error
     
-    if not row:
-        return _error("unknown_appointment", "appointment_id")
+        # Existence (Availability)
+        c.execute("SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND start = ? AND status = 'booked'", (tgt_doctor, date, start))
+        if c.fetchone():
+            conn.rollback()
+            return _error("slot_unavailable", "start")
+            
+        h, m = map(int, start.split(":"))
+        end = f"{h + (m+15)//60:02d}:{(m+15)%60:02d}"
         
-    if row["status"] != "booked":
-        return _error("already_cancelled", "appointment_id")
-        
-    tgt_doctor = doctor_id if doctor_id else row["doctor_id"]
-    if tgt_doctor not in clinic_data.doctors:
-        return _error("unknown_doctor", "doctor_id")
-        
-    # Same slot check
-    if row["date"] == date and row["start"] == start and row["doctor_id"] == tgt_doctor:
-        return _error("same_slot", "start")
-        
-    # Authority
-    if not _check_authority(conn, actor_patient_id, row["patient_id"]):
-        return _error("unauthorised_actor", "actor_patient_id")
-        
-    # The target must be a real slot for that doctor: open day, not on leave, inside a window
-    slot_error = _target_slot_error(clinic_data, tgt_doctor, date, start)
-    if slot_error:
-        return slot_error
-
-    # Existence (Availability)
-    c.execute("SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND start = ? AND status = 'booked'", (tgt_doctor, date, start))
-    if c.fetchone():
+        c.execute("UPDATE appointments SET date = ?, start = ?, end = ?, doctor_id = ? WHERE id = ?",
+                  (date, start, end, tgt_doctor, appointment_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
         return _error("slot_unavailable", "start")
-        
-    h, m = map(int, start.split(":"))
-    end = f"{h + (m+15)//60:02d}:{(m+15)%60:02d}"
-    
-    c.execute("UPDATE appointments SET date = ?, start = ?, end = ?, doctor_id = ? WHERE id = ?",
-              (date, start, end, tgt_doctor, appointment_id))
-    conn.commit()
+    except Exception:
+        conn.rollback()
+        return _error("slot_unavailable", "start")
     
     return {"ok": True, "appointment_id": appointment_id}
 

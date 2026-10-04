@@ -1,0 +1,19 @@
+{
+  "id": "cv_h10",
+  "description": "Cancel for self",
+  "today": "2026-10-01",
+  "turns": [
+    "Pooja Semwal, 9812200632.",
+    "Mera appointment cancel karna hai."
+  ],
+  "expected": {
+    "terminal_state": "cancelled",
+    "escalation_reason": null,
+    "must_call": [
+      "cancel_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}

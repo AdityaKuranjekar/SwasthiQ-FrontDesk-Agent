@@ -58,11 +58,9 @@ def test_book_double_sequential(store, clinic_data):
     assert not res2["ok"]
     assert res2["error"]["code"] == "slot_unavailable"
 
-def test_book_double_threaded(clinic_data):
-    # Using file DB for cross-thread access if needed, or in-memory with check_same_thread=False
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    # copy logic from load_run_store directly to this connection to avoid locking issues
-    from tools.store import init_db
+def test_book_double_threaded(clinic_data, tmp_path):
+    db_file = str(tmp_path / "test_db.sqlite")
+    conn = sqlite3.connect(db_file)
     import json
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -79,17 +77,29 @@ def test_book_double_threaded(clinic_data):
     for d in data.get("doctors", []):
         c.execute("INSERT INTO doctors (id, name, speciality) VALUES (?, ?, ?)", (d["id"], d["name"], d["speciality"]))
     conn.commit()
+    conn.close()
 
     results = []
+    import threading
+    barrier = threading.Barrier(20)
+    
     def worker():
-        res = book_appointment(conn, clinic_data, "pt_0013", "pt_0013", "dr_rao", "2026-10-03", "12:00")
-        results.append(res)
-        
+        try:
+            worker_conn = sqlite3.connect(db_file, timeout=20.0)
+            worker_conn.row_factory = sqlite3.Row
+            barrier.wait()
+            res = book_appointment(worker_conn, clinic_data, "pt_0013", "pt_0013", "dr_rao", "2026-10-03", "12:00")
+            results.append(res)
+        except Exception as e:
+            results.append({"ok": False, "error": str(e)})
+        finally:
+            worker_conn.close()
+            
     threads = [threading.Thread(target=worker) for _ in range(20)]
     for t in threads: t.start()
     for t in threads: t.join()
     
-    successes = [r for r in results if r["ok"]]
+    successes = [r for r in results if r.get("ok")]
     assert len(successes) == 1
     
 def test_guardian_authorised(store, clinic_data):

@@ -1,0 +1,19 @@
+{
+  "id": "cv_h02",
+  "description": "Reschedule for Neha Bhatt",
+  "today": "2026-10-01",
+  "turns": [
+    "Mera appointment reschedule karna hai. 12 tareekh subah kar do.",
+    "Neha Bhatt, 9812200404."
+  ],
+  "expected": {
+    "terminal_state": "rescheduled",
+    "escalation_reason": null,
+    "must_call": [
+      "reschedule_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ]
+  }
+}
