@@ -114,7 +114,9 @@ class AgentMachine:
                 elif actor_name and self.actor_name and actor_name != self.actor_name: self.actor_name = actor_name
                 if target_name and not self.target_name: self.target_name = target_name
             else:
-                if err != "cap_reached":
+                import logging
+                logging.getLogger(__name__).warning(f"Fallback to rules-only. reason={err}")
+                if err not in ["cap_reached", "no_key"]:
                     self.log_call("escalate_to_human", {"reason": "out_of_scope", "summary": f"Cannot parse: {err}"})
                     self.terminal_state = "escalated"
                     self.escalation_reason = "out_of_scope"

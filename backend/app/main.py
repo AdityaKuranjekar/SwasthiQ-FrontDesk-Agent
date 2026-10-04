@@ -80,6 +80,16 @@ def run_agent(req: AgentRequest):
         res = machine.finalize()
         machine.conn.close()
         
+        # Observability: Request logging
+        m = res.get("metrics", {})
+        tokens = m.get("tokens", 0)
+        latency = m.get("latency_ms", 0)
+        term_state = res.get("terminal_state", "abandoned")
+        esc_reason = res.get("escalation_reason")
+        num_tools = len(res.get("tool_calls", []))
+        logger.info(f"conversation_id={req.conversation_id} terminal_state={term_state} escalation_reason={esc_reason} tool_calls={num_tools} tokens={tokens} latency_ms={latency}")
+
+        
         return AgentResponse(
             conversation_id=req.conversation_id,
             tool_calls=res.get("tool_calls", []),

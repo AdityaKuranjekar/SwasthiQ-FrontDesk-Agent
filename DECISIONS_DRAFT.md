@@ -424,3 +424,6 @@ Test status: 47 passed, 4 xfailed (strict). Xfail tests track defects below. The
 - **[RISK]** Free-tier limits are per project and change often. Check the live limits before the public launch. Daily request cap must be set in config, and rules-only mode is the fallback when it is hit.
 - **[RISK]** Free-tier prompts may be used by Google to improve its products. Acceptable only because all data is synthetic. Real patient data is forbidden by the brief.
 - **[FIX PENDING]** The "dummy" key default in `llm.py` must become fail-closed: no key means rules-only, with no network call.
+- **[VERIFIED, live]** The key in `backend/.env` is accepted by Google. A live extraction call returned `outcome=ok`, 98 tokens, about 1.2 s.
+- **[CHANGED]** `gemini-2.5-flash-lite` returns 404 "no longer available to new users". Default model changed to `gemini-3.1-flash-lite` in `config.py`. Pinned version preferred over `-latest` aliases, because aliases can change behaviour under the determinism rule.
+- **[NOTE]** The key length (53 characters) is unusual for Google keys, but it works.
