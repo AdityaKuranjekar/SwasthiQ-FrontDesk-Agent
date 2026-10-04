@@ -414,3 +414,13 @@ Test status: 47 passed, 4 xfailed (strict). Xfail tests track defects below. The
 - **[OPEN]** "subah" with no time: current behaviour books the earliest free slot. Consistent with the Round 8 default, not confirmed by the user.
 
 **Phase B status:** closed on tests and review. Ready for Phase C (model extraction and API).
+
+## Round 15: Provider switch to Gemini
+
+- **[DECIDED]** Provider changes from Anthropic to Google Gemini, because the user has a Gemini API key and wants a model with high call volume.
+- **[DECIDED]** Model: a Flash-Lite model for extraction. Flash-Lite has the highest free-tier request limits among current models. Exact model ID to be confirmed in Google AI Studio before it is written into config. Pro models are paid-only on the free tier as of April 2026.
+- **[DECIDED]** API key from `GEMINI_API_KEY` environment variable only. Never in code, files, logs, or chat.
+- **[CHANGE]** `agent/llm.py` moves from the Anthropic SDK to the Google GenAI SDK. `anthropic` is removed from `requirements.txt`. Temperature 0 and Pydantic validation are unchanged.
+- **[RISK]** Free-tier limits are per project and change often. Check the live limits before the public launch. Daily request cap must be set in config, and rules-only mode is the fallback when it is hit.
+- **[RISK]** Free-tier prompts may be used by Google to improve its products. Acceptable only because all data is synthetic. Real patient data is forbidden by the brief.
+- **[FIX PENDING]** The "dummy" key default in `llm.py` must become fail-closed: no key means rules-only, with no network call.

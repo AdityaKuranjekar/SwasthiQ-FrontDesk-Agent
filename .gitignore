@@ -15,6 +15,11 @@ results_check/
 *.db
 *.sqlite3
 
+# Secrets: API keys live only in .env files, never in git
+.env
+.env.*
+!.env.example
+
 # Editor and OS
 .vscode/
 .idea/

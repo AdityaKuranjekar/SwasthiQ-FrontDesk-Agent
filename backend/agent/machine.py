@@ -18,6 +18,7 @@ class AgentMachine:
         self.appointment_id = None
         
         self.latch = False
+        self.metrics = {"tokens": 0, "latency_ms": 0.0, "turns": 0}
         
         # Conversation state
         self.intent = None
@@ -35,6 +36,7 @@ class AgentMachine:
         self.tool_calls.append({"name": name, "arguments": args})
 
     def process_turn(self, turn_text: str):
+        self.metrics["turns"] += 1
         self.all_text += turn_text + " "
         if getattr(self, "terminal_state", None) == "escalated" and getattr(self, "escalation_reason", None) == "clinical_urgent":
             return
@@ -63,16 +65,62 @@ class AgentMachine:
         ph = normalise_phone(turn_text)
         if ph: self.phone = ph
         
-        act, tgt = get_actor_and_target_name(turn_text, self.clinic_data)
-        if act and not self.actor_name: self.actor_name = act
-        elif act and self.actor_name and act != self.actor_name: self.actor_name = act
-        if tgt and not self.target_name: self.target_name = tgt
+        actor_name, target_name = get_actor_and_target_name(turn_text, self.clinic_data)
+        if actor_name and not self.actor_name: self.actor_name = actor_name
+        elif actor_name and self.actor_name and actor_name != self.actor_name: self.actor_name = actor_name
+        if target_name and not self.target_name: self.target_name = target_name
             
         doc = extract_doctor(turn_text, self.clinic_data)
         if doc: self.doctor_id = doc
         
         intent = extract_intent(turn_text)
-        if intent != "unknown":
+        
+        parsed_anything = any([dt, tm, ph, doc, actor_name, target_name, intent])
+        
+        # LLM Integration Point
+        if not parsed_anything:
+            from agent.llm import extract_with_llm
+            from config import DAILY_TOKEN_CAP
+            
+            # keep track of current tokens in self? Yes, let's say self.metrics if not present
+            if not hasattr(self, "metrics"):
+                self.metrics = {"tokens": 0, "latency": 0.0}
+                
+            parsed_model, tokens, latency, err = extract_with_llm(
+                turn_text, 
+                self.clinic_data, 
+                daily_cap=DAILY_TOKEN_CAP, 
+                current_daily_tokens=self.metrics["tokens"]
+            )
+            
+            self.metrics["tokens"] += tokens
+            self.metrics["latency_ms"] += int(latency * 1000)
+            
+            if parsed_model:
+                if parsed_model.intent: intent = parsed_model.intent.value
+                if parsed_model.doctor: doc = parsed_model.doctor.value
+                if parsed_model.date_phrase: dt = normalise_date(parsed_model.date_phrase, self.today)
+                if parsed_model.time_phrase: tm = normalise_time(parsed_model.time_phrase)
+                if parsed_model.patient_name:
+                    actor_name, target_name = parsed_model.patient_name, parsed_model.patient_name
+                if parsed_model.phone: ph = normalise_phone(parsed_model.phone)
+                
+                # Apply them to self
+                if dt: self.date = dt
+                if tm: self.time = tm
+                if ph: self.phone = ph
+                if doc: self.doctor_id = doc
+                if actor_name and not self.actor_name: self.actor_name = actor_name
+                elif actor_name and self.actor_name and actor_name != self.actor_name: self.actor_name = actor_name
+                if target_name and not self.target_name: self.target_name = target_name
+            else:
+                if err != "cap_reached":
+                    self.log_call("escalate_to_human", {"reason": "out_of_scope", "summary": f"Cannot parse: {err}"})
+                    self.terminal_state = "escalated"
+                    self.escalation_reason = "out_of_scope"
+                    return
+            
+        if intent and intent != "unknown":
             if self.intent and intent == "book": pass
             else: self.intent = intent
 
@@ -290,7 +338,8 @@ class AgentMachine:
             "tool_calls": self.tool_calls,
             "patient_id": self.patient_id,
             "appointment_id": self.appointment_id,
-            "reply": reply
+            "reply": reply,
+            "metrics": self.metrics
         }
 
 def run_agent_rules(conversation: dict, clinic_path: str, db_path: str) -> dict:
