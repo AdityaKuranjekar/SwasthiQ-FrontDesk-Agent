@@ -1,0 +1,11 @@
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+DB_PATH = os.environ.get("DB_PATH", ":memory:")
+CLINIC_FILE = os.environ.get("CLINIC_FILE", str(BASE_DIR.parent / "clinic.json"))
+EMERGENCY_PRIMARY = os.environ.get("EMERGENCY_PRIMARY", "112")
+EMERGENCY_AMBULANCE = os.environ.get("EMERGENCY_AMBULANCE", "108")
+DAILY_TOKEN_CAP = int(os.environ.get("DAILY_TOKEN_CAP", "100000"))
+RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "60"))
+
