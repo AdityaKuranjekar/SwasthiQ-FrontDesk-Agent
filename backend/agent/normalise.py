@@ -93,8 +93,11 @@ def normalise_phone(text: str) -> Optional[str]:
         return matches[-1]
     return None
     
-def extract_intent(text: str) -> str:
-    # A simple brute-force for the 15 scripts
+def extract_intent(text: str) -> Optional[str]:
+    """Intent stated in this turn, or None. Never defaults to book.
+
+    The conversation-level default is applied by the state machine, not here.
+    """
     text_lower = text.lower()
     if "cancel" in text_lower:
         return "cancel"
@@ -102,7 +105,21 @@ def extract_intent(text: str) -> str:
         return "reschedule"
     if "appointment" in text_lower or "dikhana hai" in text_lower or "milna hai" in text_lower or "aa sakta hoon" in text_lower:
         return "book"
-    return "book"
+    return None
+
+
+_RELATIVE_DATE_WORD = r"(?:kal|parso|aaj|tomorrow|today)"
+
+def date_is_ambiguous(text: str) -> bool:
+    """True when the caller offers two different relative dates, e.g. 'kal ya parso'."""
+    text_lower = text.lower()
+    pair = rf"\b{_RELATIVE_DATE_WORD}\b\s+(?:ya|or)(?:\s+phir)?\s+\b{_RELATIVE_DATE_WORD}\b"
+    for m in re.finditer(pair, text_lower):
+        first = re.search(_RELATIVE_DATE_WORD, m.group(0)).group(0)
+        second = re.findall(_RELATIVE_DATE_WORD, m.group(0))[-1]
+        if first != second:
+            return True
+    return False
     
 
 

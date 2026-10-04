@@ -3,7 +3,7 @@ from tools.store import load_run_store
 from tools.data import load_clinic_data
 from tools.agent_tools import search_slots, book_appointment, reschedule_appointment, cancel_appointment, lookup_patient, escalate_to_human
 from agent.gate import check_gate
-from agent.normalise import normalise_date, normalise_time, normalise_phone, extract_intent, extract_doctor, get_actor_and_target_name
+from agent.normalise import normalise_date, normalise_time, normalise_phone, extract_intent, extract_doctor, get_actor_and_target_name, date_is_ambiguous
 
 class AgentMachine:
     def __init__(self, clinic_path: str, db_path: str, today: str):
@@ -31,6 +31,7 @@ class AgentMachine:
         self.phone = None
         
         self.candidates = []
+        self.date_ambiguous = False
 
     def log_call(self, name: str, args: dict):
         self.tool_calls.append({"name": name, "arguments": args})
@@ -58,8 +59,14 @@ class AgentMachine:
             return
 
         # 2. NORMALISE
-        dt = normalise_date(turn_text, self.today)
-        if dt: self.date = dt
+        self.date_ambiguous = date_is_ambiguous(turn_text)
+        if self.date_ambiguous:
+            # "kal ya parso": do not pick one. Ask once; no date is used until the caller chooses.
+            dt = None
+            self.date = None
+        else:
+            dt = normalise_date(turn_text, self.today)
+            if dt: self.date = dt
         tm = normalise_time(turn_text)
         if tm: self.time = tm
         ph = normalise_phone(turn_text)
@@ -73,58 +80,97 @@ class AgentMachine:
         doc = extract_doctor(turn_text, self.clinic_data)
         if doc: self.doctor_id = doc
         
-        intent = extract_intent(turn_text)
-        
+        rule_intent = extract_intent(turn_text)
+        intent = rule_intent
+
         parsed_anything = any([dt, tm, ph, doc, actor_name, target_name, intent])
         
         # LLM Integration Point
-        if not parsed_anything:
-            from agent.llm import extract_with_llm
-            from config import DAILY_TOKEN_CAP
+        from agent.llm import extract_with_llm
+        from config import DAILY_TOKEN_CAP, EXTRACT_MODE
+        
+        if getattr(self, "metrics", None) is None:
+            self.metrics = {"tokens": 0, "latency_ms": 0, "turns": 0}
             
-            # keep track of current tokens in self? Yes, let's say self.metrics if not present
-            if not hasattr(self, "metrics"):
-                self.metrics = {"tokens": 0, "latency": 0.0}
-                
-            parsed_model, tokens, latency, err = extract_with_llm(
-                turn_text, 
-                self.clinic_data, 
-                daily_cap=DAILY_TOKEN_CAP, 
-                current_daily_tokens=self.metrics["tokens"]
+        call_llm = False
+        if EXTRACT_MODE == "always":
+            call_llm = True
+        elif not parsed_anything:
+            call_llm = True
+            
+        if call_llm:
+            self.metrics["model_attempts"] = self.metrics.get("model_attempts", 0) + 1
+            current_daily_tokens = 0
+            llm_parsed, tokens, latency, err = extract_with_llm(
+                turn_text, self.clinic_data, DAILY_TOKEN_CAP, current_daily_tokens
             )
+            
+            if err == "rate_limited": self.metrics["model_rate_limited"] = self.metrics.get("model_rate_limited", 0) + 1
+            elif err == "invalid": self.metrics["model_invalid"] = self.metrics.get("model_invalid", 0) + 1
+            elif err == "error": self.metrics["model_error"] = self.metrics.get("model_error", 0) + 1
+            elif err is None: self.metrics["model_success"] = self.metrics.get("model_success", 0) + 1
             
             self.metrics["tokens"] += tokens
             self.metrics["latency_ms"] += int(latency * 1000)
             
-            if parsed_model:
-                if parsed_model.intent: intent = parsed_model.intent.value
-                if parsed_model.doctor: doc = parsed_model.doctor.value
-                if parsed_model.date_phrase: dt = normalise_date(parsed_model.date_phrase, self.today)
-                if parsed_model.time_phrase: tm = normalise_time(parsed_model.time_phrase)
-                if parsed_model.patient_name:
-                    actor_name, target_name = parsed_model.patient_name, parsed_model.patient_name
-                if parsed_model.phone: ph = normalise_phone(parsed_model.phone)
-                
-                # Apply them to self
-                if dt: self.date = dt
-                if tm: self.time = tm
-                if ph: self.phone = ph
-                if doc: self.doctor_id = doc
-                if actor_name and not self.actor_name: self.actor_name = actor_name
-                elif actor_name and self.actor_name and actor_name != self.actor_name: self.actor_name = actor_name
-                if target_name and not self.target_name: self.target_name = target_name
+            if llm_parsed:
+                # "other" means the model saw no booking, cancel or reschedule intent. It is not an intent.
+                if llm_parsed.intent and llm_parsed.intent.value != "other" and not intent:
+                    intent = llm_parsed.intent.value
+                if llm_parsed.doctor and not doc: 
+                    doc = llm_parsed.doctor.value
+                    self.doctor_id = doc
+                    
+                if getattr(llm_parsed, "date_phrase", None) and not self.date_ambiguous:
+                    llm_dt = normalise_date(llm_parsed.date_phrase, self.today)
+                    if llm_dt and not dt:
+                        dt = llm_dt
+                        self.date = dt
+                        
+                if getattr(llm_parsed, "time_phrase", None):
+                    llm_tm = normalise_time(llm_parsed.time_phrase)
+                    if llm_tm and not tm:
+                        tm = llm_tm
+                        self.time = tm
+                        
+                if getattr(llm_parsed, "patient_name", None):
+                    if not actor_name:
+                        actor_name = llm_parsed.patient_name
+                        self.actor_name = actor_name
+                    if not target_name:
+                        target_name = llm_parsed.patient_name
+                        self.target_name = target_name
+                        
+                if getattr(llm_parsed, "phone", None):
+                    llm_ph = normalise_phone(llm_parsed.phone)
+                    if llm_ph and not ph:
+                        ph = llm_ph
+                        self.phone = ph
             else:
                 import logging
                 logging.getLogger(__name__).warning(f"Fallback to rules-only. reason={err}")
-                if err not in ["cap_reached", "no_key"]:
-                    self.log_call("escalate_to_human", {"reason": "out_of_scope", "summary": f"Cannot parse: {err}"})
-                    self.terminal_state = "escalated"
-                    self.escalation_reason = "out_of_scope"
-                    return
-            
-        if intent and intent != "unknown":
-            if self.intent and intent == "book": pass
-            else: self.intent = intent
+                # Transient failures (quota, network, no key, cap) fall back to rules without escalating,
+                # so an outage cannot change a conversation's outcome. Malformed output still escalates.
+                if err not in ["cap_reached", "no_key", "rate_limited", "error"]:
+                    if not parsed_anything:
+                        self.log_call("escalate_to_human", {"reason": "out_of_scope", "summary": f"Cannot parse: {err}"})
+                        self.terminal_state = "escalated"
+                        self.escalation_reason = "out_of_scope"
+                        return
+        # Intent precedence:
+        #   1. An explicit cancel or reschedule in this turn overrides.
+        #   2. An explicit book sets intent only if none is set yet.
+        #   3. The model may set intent only if none is set yet. It never overrides.
+        #   4. If still none and a doctor and a date or time are known, the conversation is a booking.
+        model_intent = intent if rule_intent is None else None
+        if rule_intent in ("cancel", "reschedule"):
+            self.intent = rule_intent
+        elif rule_intent == "book" and self.intent is None:
+            self.intent = "book"
+        elif model_intent and self.intent is None:
+            self.intent = model_intent
+        if self.intent is None and self.doctor_id and (self.date or self.time):
+            self.intent = "book"
 
         # If nothing parsed at all and no intent, just return (Wait for more info)
         # However, if we have name/phone, let's identify
@@ -320,6 +366,8 @@ class AgentMachine:
             fallback = "Sorry, main yeh request process nahi kar sakta."
         elif self.terminal_state == "abandoned":
             fallback = "Main request complete nahi kar paya. Kripya dobara try karein."
+            if getattr(self, "date_ambiguous", False):
+                fallback = "Kaunsi tareekh chahiye, kal ya parso? Kripya ek tareekh batayein."
         elif self.terminal_state == "escalated":
             if self.escalation_reason == "clinical_urgent":
                 fallback = f"A human is connecting. If symptoms are severe or worsening, call the emergency number now at {EMERGENCY_PRIMARY} or {EMERGENCY_AMBULANCE}. I cannot provide medical advice."

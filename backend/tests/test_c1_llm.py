@@ -53,8 +53,7 @@ def test_malformed_output_no_crash(mock_create):
     mock_create.return_value = bad_mock
     
     parsed, tokens, latency, err = extract_with_llm("do something bad", clinic_data)
-    # The first attempt fails validation, second attempt fails validation -> returns validation_failed
-    assert err == "validation_failed"
+    assert err == "invalid"
     assert parsed is None
 
 @patch('google.genai.models.Models.generate_content')
@@ -87,3 +86,30 @@ def test_no_key_skips_network(mock_create, monkeypatch):
     assert parsed is None
     assert mock_create.call_count == 0
 
+@patch('google.genai.models.Models.generate_content')
+def test_llm_rate_limited(mock_create):
+    mock_create.side_effect = Exception("429 RESOURCE_EXHAUSTED Quota exceeded")
+    parsed, tokens, latency, err = extract_with_llm("hello", clinic_data)
+    assert err == "rate_limited"
+    assert parsed is None
+    assert tokens == 0
+
+@patch('google.genai.models.Models.generate_content')
+def test_llm_network_error(mock_create):
+    mock_create.side_effect = Exception("Connection reset by peer")
+    parsed, tokens, latency, err = extract_with_llm("hello", clinic_data)
+    assert err == "error"
+    assert parsed is None
+    assert tokens == 0
+
+from agent.machine import AgentMachine
+@patch("agent.llm.extract_with_llm")
+def test_extract_mode_always_calls_model(mock_extract, monkeypatch):
+    monkeypatch.setattr("config.EXTRACT_MODE", "always")
+    mock_extract.return_value = (None, 10, 0.1, "no_key")
+    
+    machine = AgentMachine(CLINIC_FILE, ":memory:", "2026-10-04")
+    machine.process_turn("hello world")
+    machine.process_turn("second turn")
+    
+    assert mock_extract.call_count == 2

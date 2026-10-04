@@ -91,13 +91,16 @@ def extract_with_llm(
             
             return response.text, tokens, latency, None
         except Exception as e:
-            return None, 0, time.time() - start, str(e)
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                return None, 0, time.time() - start, "rate_limited"
+            return None, 0, time.time() - start, "error"
 
     raw_input, tokens, latency, err = call_api()
-    if raw_input is None:
-        _CACHE[text_hash] = {"model": None, "error": "malformed_output"}
-        logger.info(f"provider=gemini model={GEMINI_MODEL} outcome=error tokens={tokens} latency_ms={int(latency*1000)}")
-        return None, tokens, latency, "malformed_output"
+    if err:
+        _CACHE[text_hash] = {"model": None, "error": err}
+        logger.info(f"provider=gemini model={GEMINI_MODEL} outcome={err} tokens={tokens} latency_ms={int(latency*1000)}")
+        return None, tokens, latency, err
         
     try:
         parsed = ExtractionModel.model_validate_json(raw_input)
@@ -110,10 +113,10 @@ def extract_with_llm(
         tot_tokens = tokens + tokens_2
         tot_latency = latency + latency_2
         
-        if raw_input_2 is None:
-            _CACHE[text_hash] = {"model": None, "error": "malformed_output"}
-            logger.info(f"provider=gemini model={GEMINI_MODEL} outcome=error tokens={tokens_2} latency_ms={int(latency_2*1000)}")
-            return None, tot_tokens, tot_latency, "malformed_output"
+        if err_2:
+            _CACHE[text_hash] = {"model": None, "error": err_2}
+            logger.info(f"provider=gemini model={GEMINI_MODEL} outcome={err_2} tokens={tokens_2} latency_ms={int(latency_2*1000)}")
+            return None, tot_tokens, tot_latency, err_2
             
         try:
             parsed_2 = ExtractionModel.model_validate_json(raw_input_2)
@@ -121,7 +124,7 @@ def extract_with_llm(
             logger.info(f"provider=gemini model={GEMINI_MODEL} outcome=ok tokens={tokens_2} latency_ms={int(latency_2*1000)}")
             return parsed_2, tot_tokens, tot_latency, None
         except ValidationError:
-            _CACHE[text_hash] = {"model": None, "error": "validation_failed"}
+            _CACHE[text_hash] = {"model": None, "error": "invalid"}
             logger.info(f"provider=gemini model={GEMINI_MODEL} outcome=invalid tokens={tokens_2} latency_ms={int(latency_2*1000)}")
-            return None, tot_tokens, tot_latency, "validation_failed"
+            return None, tot_tokens, tot_latency, "invalid"
 
