@@ -123,22 +123,9 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
     if not doctor:
         return _error("unknown_doctor", "doctor_id")
         
-    # Check if slot exists in master grid
-    dt = datetime.strptime(date, "%Y-%m-%d")
-    day_short = dt.strftime("%a")
-    day_windows = [w for w in doctor.windows if w.day == day_short]
-    from tools.data import merge_windows, _mins_to_time
-    merged = merge_windows(day_windows)
-    
-    valid_slots = []
-    for start_m, end_m in merged:
-        curr = start_m
-        while curr + 15 <= end_m:
-            valid_slots.append(_mins_to_time(curr))
-            curr += 15
-            
-    if start not in valid_slots or dt.strftime("%a") == "Sun" or date in clinic_data.holidays or date in doctor.leave_dates:
-        return _error("not_on_slot_grid", "start")
+    slot_error = _target_slot_error(clinic_data, doctor_id, date, start)
+    if slot_error:
+        return slot_error
 
     # 2. Existence
     c = conn.cursor()
@@ -154,7 +141,7 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
     # start + 15 mins
     h, m = map(int, start.split(":"))
     end_m = h * 60 + m + 15
-    end = _mins_to_time(end_m)
+    end = f"{end_m // 60:02d}:{end_m % 60:02d}"
     
     try:
         c.execute("INSERT INTO appointments (id, patient_id, doctor_id, date, start, end, status) VALUES (?, ?, ?, ?, ?, ?, 'booked')",
@@ -164,6 +151,27 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
         return _error("slot_unavailable", "start")
         
     return {"ok": True, "appointment_id": ap_id}
+
+def _target_slot_error(clinic_data, doctor_id: str, date: str, start: str) -> Optional[Dict[str, Any]]:
+    """Return an error if the slot is not a real bookable slot for this doctor, else None."""
+    from tools.data import merge_windows, _mins_to_time
+    doctor = clinic_data.doctors[doctor_id]
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    if dt.strftime("%a") == "Sun" or date in clinic_data.holidays:
+        return _error("clinic_closed", "date")
+    if date in doctor.leave_dates:
+        return _error("doctor_on_leave", "date")
+    day_short = dt.strftime("%a")
+    merged = merge_windows([w for w in doctor.windows if w.day == day_short])
+    valid = set()
+    for start_m, end_m in merged:
+        curr = start_m
+        while curr + 15 <= end_m:
+            valid.add(_mins_to_time(curr))
+            curr += 15
+    if start not in valid:
+        return _error("outside_window", "start")
+    return None
 
 def reschedule_appointment(conn, clinic_data, actor_patient_id: str, appointment_id: str, date: str, start: str, doctor_id: Optional[str] = None) -> Dict[str, Any]:
     try:
@@ -196,6 +204,11 @@ def reschedule_appointment(conn, clinic_data, actor_patient_id: str, appointment
     if not _check_authority(conn, actor_patient_id, row["patient_id"]):
         return _error("unauthorised_actor", "actor_patient_id")
         
+    # The target must be a real slot for that doctor: open day, not on leave, inside a window
+    slot_error = _target_slot_error(clinic_data, tgt_doctor, date, start)
+    if slot_error:
+        return slot_error
+
     # Existence (Availability)
     c.execute("SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND start = ? AND status = 'booked'", (tgt_doctor, date, start))
     if c.fetchone():
