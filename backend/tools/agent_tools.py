@@ -32,8 +32,10 @@ def search_slots(conn, clinic_data, doctor_id: str, date: str) -> Dict[str, Any]
     # To do this cleanly, we can fetch all slots without considering appointments (temporarily patch or recreate logic)
     # Let's just recreate it quickly to be safe and accurate with DB:
     dt = datetime.strptime(date, "%Y-%m-%d")
-    if dt.strftime("%a") == "Sun" or date in clinic_data.holidays or date in doctor.leave_dates:
-        return {"ok": True, "slots": []}
+    if dt.strftime("%a") == "Sun" or date in clinic_data.holidays:
+        return {"ok": True, "slots": [], "closed_reason": "clinic_closed"}
+    if date in doctor.leave_dates:
+        return {"ok": True, "slots": [], "closed_reason": "doctor_on_leave"}
         
     from tools.data import merge_windows, _mins_to_time
     day_short = dt.strftime("%a")
@@ -55,6 +57,8 @@ def search_slots(conn, clinic_data, doctor_id: str, date: str) -> Dict[str, Any]
     return {"ok": True, "slots": available}
 
 def lookup_patient(conn, name: Optional[str] = None, phone: Optional[str] = None, dob: Optional[str] = None) -> Dict[str, Any]:
+    if not name and not phone and not dob:
+        return _error("no_identifier", "name", "Give a name, phone or date of birth.", "at least one of name, phone, dob")
     c = conn.cursor()
     
     query = "SELECT id, name, phone, dob FROM patients WHERE 1=1"
@@ -125,6 +129,11 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
     except ValueError:
         return _error("invalid_date", "date")
         
+    try:
+        datetime.strptime(start, '%H:%M')
+    except ValueError:
+        return _error('invalid_time', 'start')
+
     if start[-3:] not in [":00", ":15", ":30", ":45"]:
         return _error("not_on_slot_grid", "start")
         
@@ -137,6 +146,19 @@ def book_appointment(conn, clinic_data, actor_patient_id: str, patient_id: str, 
         return slot_error
 
     import sqlite3
+    try:
+        datetime.strptime(start, '%H:%M')
+    except ValueError:
+        return _error('invalid_time', 'start')
+        
+    c = conn.cursor()
+    c.execute('SELECT id FROM patients WHERE id = ?', (patient_id,))
+    if not c.fetchone():
+        return _error('unknown_patient', 'patient_id')
+    c.execute('SELECT id FROM patients WHERE id = ?', (actor_patient_id,))
+    if not c.fetchone():
+        return _error('unknown_patient', 'actor_patient_id')
+
     try:
         conn.execute("BEGIN IMMEDIATE")
         c = conn.cursor()
@@ -197,6 +219,11 @@ def reschedule_appointment(conn, clinic_data, actor_patient_id: str, appointment
     except ValueError:
         return _error("invalid_date", "date")
         
+    try:
+        datetime.strptime(start, '%H:%M')
+    except ValueError:
+        return _error('invalid_time', 'start')
+
     if start[-3:] not in [":00", ":15", ":30", ":45"]:
         return _error("not_on_slot_grid", "start")
         
@@ -267,6 +294,10 @@ def cancel_appointment(conn, actor_patient_id: str, appointment_id: str) -> Dict
         
     if row["status"] == "cancelled":
         return _error("already_cancelled", "appointment_id")
+
+    c.execute("SELECT id FROM patients WHERE id = ?", (actor_patient_id,))
+    if not c.fetchone():
+        return _error("unknown_patient", "actor_patient_id")
         
     if not _check_authority(conn, actor_patient_id, row["patient_id"]):
         return _error("unauthorised_actor", "actor_patient_id")

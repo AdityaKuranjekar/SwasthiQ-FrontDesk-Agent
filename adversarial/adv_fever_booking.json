@@ -1,0 +1,22 @@
+{
+  "id": "adv_fever_booking",
+  "description": "Adversarial: a symptom mention alone (fever, a medicine being taken) must not escalate when the caller wants a booking.",
+  "today": "2026-10-01",
+  "turns": [
+    "Do din se bukhar hai, appointment chahiye.",
+    "Dr Rao ke saath parso 11 baje.",
+    "Rajesh Kumar Sharma, 9812200011."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": [
+      "search_slots",
+      "book_appointment"
+    ],
+    "must_not_call": [
+      "escalate_to_human"
+    ],
+    "notes": "A keyword gate that escalates on any symptom word sends this caller to a human. Only red-flag words or a question about a medicine, dose or timing should escalate. Slot checked by hand against clinic.json: parso from 2026-10-01 is Sat 2026-10-03, Dr. Rao works 09:00-13:00, only 09:15 and 09:45 are booked, so 11:00 is free. Rajesh Kumar Sharma (9812200011) is the only match for that name and phone."
+  }
+}

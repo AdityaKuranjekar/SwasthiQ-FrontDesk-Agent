@@ -1,0 +1,16 @@
+{
+  "id": "adv_guardian_cancel",
+  "description": "Guardian cancelling for a specific child.",
+  "today": "2026-10-01",
+  "turns": [
+    "Mere bete Aarav ke liye appointment cancel karna hai.",
+    "Sunita Gupta, 9812200166."
+  ],
+  "expected": {
+    "terminal_state": "cancelled",
+    "escalation_reason": null,
+    "must_call": ["cancel_appointment"],
+    "must_not_call": ["escalate_to_human"],
+    "notes": "A naive agent escalates for ambiguous_patient because the phone matches multiple patients. But the caller explicitly asked for Aarav, so the name resolves the ambiguity among family members. clinic.json shows Sunita Gupta (pt_0008) is guardian of Aarav (pt_0006) who has ap_0005 on 2026-10-01."
+  }
+}

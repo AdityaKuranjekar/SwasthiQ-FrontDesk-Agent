@@ -151,3 +151,59 @@ def test_error_order(store, clinic_data):
     res2 = book_appointment(store, clinic_data, "pt_0020", "pt_0001", "dr_rao", "2026-10-01", "09:30")
     # should fail on existence (slot_unavailable) before authority check
     assert res2["error"]["code"] == "slot_unavailable"
+
+def test_search_slots_closed_reasons(store, clinic_data):
+    res = search_slots(store, clinic_data, "dr_rao", "2026-10-04") # Sunday
+    assert res["ok"]
+    assert res["closed_reason"] == "clinic_closed"
+
+    res = search_slots(store, clinic_data, "dr_rao", "2026-10-02") # Holiday
+    assert res["ok"]
+    assert res["closed_reason"] == "clinic_closed"
+
+    res = search_slots(store, clinic_data, "dr_sethi", "2026-10-01") # doctor_on_leave (Wait, let's verify if dr_sethi is on leave)
+    res = search_slots(store, clinic_data, "dr_rao", "2026-10-09")
+    assert res["ok"]
+    assert res["closed_reason"] == "doctor_on_leave"
+
+def test_malformed_lookup_patient(store):
+    res = lookup_patient(store)
+    assert res['ok'] is False
+    assert res['error']['code'] == 'no_identifier'
+    assert res['error']['field'] == 'name'
+
+def test_malformed_search_slots(store, clinic_data):
+    res = search_slots(store, clinic_data, 'dr_rao', 'bad-date')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'invalid_date'
+    assert res['error']['field'] == 'date'
+
+def test_malformed_book_appointment(store, clinic_data):
+    res = book_appointment(store, clinic_data, 'pt_0001', 'pt_xxx', 'dr_rao', '2026-10-03', '09:00')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'unknown_patient'
+    assert res['error']['field'] == 'patient_id'
+
+def test_malformed_reschedule_appointment(store, clinic_data):
+    res = reschedule_appointment(store, clinic_data, 'pt_0001', 'ap_0001', '2026-10-03', '09:12', 'dr_rao')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'not_on_slot_grid'
+    assert res['error']['field'] == 'start'
+    
+def test_malformed_reschedule_appointment_invalid_time(store, clinic_data):
+    res = reschedule_appointment(store, clinic_data, 'pt_0001', 'ap_0001', '2026-10-03', 'xx:15', 'dr_rao')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'invalid_time'
+    assert res['error']['field'] == 'start'
+
+def test_malformed_cancel_appointment(store):
+    res = cancel_appointment(store, 'pt_xxx', 'ap_0001')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'unknown_patient'
+    assert res['error']['field'] == 'actor_patient_id'
+
+def test_malformed_escalate_to_human(store):
+    res = escalate_to_human(store, 'bad_reason', 'summary')
+    assert res['ok'] is False
+    assert res['error']['code'] == 'invalid_reason'
+    assert res['error']['field'] == 'reason'

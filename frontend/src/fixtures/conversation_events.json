@@ -1,0 +1,32 @@
+[
+  {
+    "event_type": "caller",
+    "position": 0,
+    "content": "Kal subah ka appointment mil jayega Dr. Rao ke saath?"
+  },
+  {
+    "event_type": "tool",
+    "position": 1,
+    "content": "{\"name\": \"search_slots\", \"arguments\": {\"doctor_id\": \"dr_rao\", \"date\": \"2026-10-05\", \"window\": \"morning\"}, \"result\": {}, \"summary\": \"3 slots: 09:30, 10:15, 11:00\"}"
+  },
+  {
+    "event_type": "reply",
+    "position": 2,
+    "content": "Ji, kal subah 9:30, 10:15 aur 11:00 khali hai. Kaun sa theek rahega?"
+  },
+  {
+    "event_type": "caller",
+    "position": 10,
+    "content": "10:15 kar dijiye. Waise abhi seene mein dard ho raha hai thoda."
+  },
+  {
+    "event_type": "tool",
+    "position": 11,
+    "content": "{\"name\": \"escalate_to_human\", \"arguments\": {\"reason\": \"clinical_urgent\", \"summary\": \"caller reports active chest pain\"}, \"result\": {\"ticket_id\": \"TK-992\"}, \"summary\": \"ticket_id: TK-992\"}"
+  },
+  {
+    "event_type": "reply",
+    "position": 12,
+    "content": "Main abhi aapko clinic se connect kar rahi hoon. Agar dard badh raha hai, turant nazdeeki emergency par jaiye."
+  }
+]

@@ -1,6 +1,21 @@
 import os
+import glob
+try:
+    for f in glob.glob("*.db"):
+        os.remove(f)
+except Exception:
+    pass
 
-# Tests must never reach the live Gemini API, even when backend/.env holds a real key.
-# An empty value is treated as "no key" by agent/llm.py, so the model is skipped.
-# The live check is run only by scripts/live_agreement.py or a test marked `live`.
+os.environ["DB_PATH"] = "test_run.db"
 os.environ["GEMINI_API_KEY"] = ""
+# The suite makes hundreds of requests from one client; the rate limiter has its own dedicated test.
+os.environ["RATE_LIMIT_PER_MIN"] = "100000"
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    from app import main
+    main.ip_tracking.clear()
+    yield

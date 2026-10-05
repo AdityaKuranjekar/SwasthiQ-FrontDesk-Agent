@@ -46,44 +46,71 @@ def normalise_date(text: str, today: str) -> Optional[str]:
     found_dates.sort(key=lambda x: x[0])
     return found_dates[-1][1]
 
+NUMBER_WORDS = {
+    "ek": 1, "do": 2, "teen": 3, "char": 4, "chaar": 4, "paanch": 5, "panch": 5, "chhe": 6, "chhah": 6,
+    "saat": 7, "aath": 8, "nau": 9, "das": 10, "gyarah": 11, "barah": 12, "baarah": 12,
+}
+_NUM = r"\d{1,2}|" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+_EVENING_WORDS = r"\b(shaam|sham|evening|raat|dopahar|afternoon)\b"
+_MORNING_WORDS = r"\b(subah|morning)\b"
+
+
+def _hour(token: str) -> int:
+    return int(token) if token.isdigit() else NUMBER_WORDS[token]
+
+
+def _to_24h(hour: int, text_lower: str) -> int:
+    """Spoken hours carry no am or pm. Use the caller's own word if there is one.
+
+    Without one, the clinic is never open before 09:00, so 1 to 7 can only mean the afternoon or evening.
+    """
+    if hour >= 12:
+        return hour
+    if re.search(_EVENING_WORDS, text_lower):
+        return hour + 12
+    if re.search(_MORNING_WORDS, text_lower):
+        return hour
+    return hour + 12 if 1 <= hour <= 7 else hour
+
+
 def normalise_time(text: str) -> Optional[str]:
+    """A concrete HH:MM if the caller gave one, else a 'morning' or 'evening' flag, else None.
+
+    A concrete time always wins over a flag, whatever order they were said in. Among concrete times, the last wins.
+    """
     text_lower = text.lower()
-    found_times = []
-    
-    # exact matches like 9:30
-    for m in re.finditer(r'(\d{1,2}:\d{2})', text_lower):
-        parts = m.group(1).split(":")
-        t = f"{int(parts[0]):02d}:{parts[1]}"
-        found_times.append((m.start(), t))
-        
-    # baje matches
-    for m in re.finditer(r'(gyarah|10|9|11|12|1|2|3|4|5|6|7|8)\s+baje', text_lower):
-        val = m.group(1)
-        if val == "gyarah": t = "11:00"
-        elif val == "10": t = "10:00"
-        elif val == "9": t = "09:00"
-        elif val == "11": t = "11:00"
-        else: t = f"{int(val):02d}:00"
-        found_times.append((m.start(), t))
-        
-    for m in re.finditer(r'saadhe\s+(nau|9|10|11)', text_lower):
-        val = m.group(1)
-        if val in ("nau", "9"): t = "09:30"
-        elif val == "10": t = "10:30"
-        else: t = "11:30"
-        found_times.append((m.start(), t))
-        
-    # time of day flags (subah, shaam)
-    for m in re.finditer(r'\b(subah|shaam|morning|evening)\b', text_lower):
-        val = m.group(1)
-        flag = "evening" if val in ("shaam", "evening") else "morning"
-        found_times.append((m.start(), flag))
-        
-    if not found_times:
-        return None
-        
-    found_times.sort(key=lambda x: x[0])
-    return found_times[-1][1]
+    concrete = []
+
+    # exact matches like 9:30 or 3:15
+    for m in re.finditer(r'\b(\d{1,2}):(\d{2})\b', text_lower):
+        concrete.append((m.start(), f"{_to_24h(int(m.group(1)), text_lower):02d}:{m.group(2)}"))
+
+    # "saadhe nau" = 9:30, "saadhe teen" = 15:30
+    for m in re.finditer(rf'\bsaadhe\s+({_NUM})\b', text_lower):
+        concrete.append((m.start(), f"{_to_24h(_hour(m.group(1)), text_lower):02d}:30"))
+
+    # "dedh baje" = 1:30, "dhai baje" = 2:30
+    for m in re.finditer(r'\b(dedh|dhai)\s+baje\b', text_lower):
+        hour = 1 if m.group(1) == "dedh" else 2
+        concrete.append((m.start(), f"{_to_24h(hour, text_lower):02d}:30"))
+
+    # "10 baje", "gyarah baje", "teen baje". The number must not be the minutes of an H:MM time ("9:15 baje").
+    for m in re.finditer(rf'(?<![\d:])\b({_NUM})\s+baje\b', text_lower):
+        hour = _hour(m.group(1))
+        if hour <= 23:
+            concrete.append((m.start(), f"{_to_24h(hour, text_lower):02d}:00"))
+
+    if concrete:
+        concrete.sort(key=lambda x: x[0])
+        return concrete[-1][1]
+
+    flags = []
+    for m in re.finditer(r'\b(subah|shaam|sham|morning|evening)\b', text_lower):
+        flags.append((m.start(), "evening" if m.group(1) in ("shaam", "sham", "evening") else "morning"))
+    if flags:
+        flags.sort(key=lambda x: x[0])
+        return flags[-1][1]
+    return None
 
 def normalise_phone(text: str) -> Optional[str]:
     # Strip spaces and dashes, look for 10 digits

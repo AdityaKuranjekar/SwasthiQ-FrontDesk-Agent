@@ -1,0 +1,13 @@
+{
+  "conversation_id": "cv_0011",
+  "date": "2026-10-04",
+  "time": "11:42",
+  "terminal_state": "escalated",
+  "escalation_reason": "clinical_urgent",
+  "patient_id": "pt_0192",
+  "appointment_id": null,
+  "tool_call_count": 2,
+  "turns": 6,
+  "tokens": 3140,
+  "latency_ms": 4200
+}

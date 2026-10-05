@@ -1,0 +1,17 @@
+{
+  "id": "adv_change_of_mind",
+  "description": "User changes their mind about the booking time in the next turn.",
+  "today": "2026-10-01",
+  "turns": [
+    "Dr. Rao ke saath Mangalwar 6 tareekh ko 10 baje.",
+    "Nahi, budhwar 7 tareekh, 11 baje.",
+    "Harpreet Singh, 9812200311."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": ["book_appointment"],
+    "must_not_call": ["escalate_to_human"],
+    "notes": "A naive agent books the first date it heard. 2026-10-07 is a Wednesday. Dr. Rao's Wednesday window is 09:00-12:00, and 11:00 is free (clinic.json has no ap for dr_rao on 2026-10-07 at 11:00)."
+  }
+}

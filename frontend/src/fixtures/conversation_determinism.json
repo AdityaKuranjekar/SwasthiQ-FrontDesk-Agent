@@ -1,0 +1,5 @@
+[
+  {"run_index": 1, "terminal_state": "escalated", "escalation_reason": "clinical_urgent", "tool_calls": "[\"search_slots\", \"escalate_to_human\"]"},
+  {"run_index": 2, "terminal_state": "escalated", "escalation_reason": "clinical_urgent", "tool_calls": "[\"search_slots\", \"escalate_to_human\"]"},
+  {"run_index": 3, "terminal_state": "escalated", "escalation_reason": "clinical_urgent", "tool_calls": "[\"search_slots\", \"escalate_to_human\"]"}
+]

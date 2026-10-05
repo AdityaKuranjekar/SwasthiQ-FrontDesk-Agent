@@ -26,14 +26,18 @@ def test_benign_corpus():
         "cold", "cough", "Dr Rao", "cancel karna hai", "hello", "namaste",
         "I want to book", "check my schedule", "is he available", "reschedule",
         "what is the time", "where is the clinic", "can I come", "please book",
-        "thanks bye"
+        "thanks bye",
+        # A statement or a bare drug name is not a question, and a symptom alone is not an escalation.
+        "Do din se bukhar hai, main Crocin le raha hoon", "Crocin le raha hoon", "dawai", "goli", "Crocin",
+        "Do din se bukhar hai, appointment chahiye"
     ]
     for c in corpus:
         res = check_gate(c)
         assert res is None
 
 def test_medication_corpus():
-    for c in ["dawai", "goli", "Crocin", "kitni der", "dose", "Crocin ka matlab kya hai"]:
+    for c in ["kitni der", "dose", "Crocin ka matlab kya hai", "Ek aur goli le lun ya nahi?", "dawai band kar dun?",
+              "Ek aur goli le lun ya nahi? Aur kitni der mein utar jana chahiye?"]:
         res = check_gate(c)
         assert res is not None and res.reason == "medical_advice"
         

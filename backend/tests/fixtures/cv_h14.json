@@ -1,0 +1,17 @@
+{
+  "id": "cv_h14",
+  "description": "Sunday is closed, the caller moves to Monday at a time that is free.",
+  "today": "2026-10-01",
+  "turns": [
+    "Dr. Rao se Sunday 4 tareekh ko milna hai.",
+    "Accha, toh somwar subah 9:15 baje.",
+    "Priya Menon, 9812200135."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": ["search_slots", "lookup_patient", "book_appointment"],
+    "must_not_call": ["escalate_to_human"],
+    "notes": "No doctor works Sunday. somwar from Thu 2026-10-01 is Mon 2026-10-05. Dr. Rao works 09:00-12:00 on Monday, 09:00 is taken (ap_0009) and 09:15 is free. Priya Menon (pt_0005, 9812200135) is the only match, not Priya Nair."
+  }
+}

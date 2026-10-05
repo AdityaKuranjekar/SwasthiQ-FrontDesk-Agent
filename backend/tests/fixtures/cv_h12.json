@@ -1,0 +1,17 @@
+{
+  "id": "cv_h12",
+  "description": "The requested slot is taken, the caller then picks a free one.",
+  "today": "2026-10-01",
+  "turns": [
+    "Dr. Sethi ke saath 8 tareekh 10 baje.",
+    "Accha, toh 10:30 kar dijiye.",
+    "Neha Bhatt, 9812200404."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": ["search_slots", "lookup_patient", "book_appointment"],
+    "must_not_call": ["escalate_to_human"],
+    "notes": "Dr. Sethi on Thu 2026-10-08: 10:00 is taken (ap_0013), 10:30 is free. Neha Bhatt (pt_0016, 9812200404) is the only match. A naive agent confirms 10:00 without checking."
+  }
+}

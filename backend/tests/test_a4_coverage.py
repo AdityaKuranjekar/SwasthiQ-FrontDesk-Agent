@@ -46,7 +46,7 @@ def test_search_unknown_doctor(store, clinic_data):
 
 def test_search_sunday_is_empty(store, clinic_data):
     res = search_slots(store, clinic_data, "dr_rao", "2026-10-04")
-    assert res == {"ok": True, "slots": []}
+    assert res == {"ok": True, "slots": [], "closed_reason": "clinic_closed"}
 
 
 # --- lookup_patient ---------------------------------------------------------
@@ -62,7 +62,6 @@ def test_lookup_unknown_name_is_none(store):
     assert res == {"ok": True, "status": "none"}
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT: no identifiers returns every patient instead of no_identifier error")
 def test_lookup_without_identifiers_is_rejected(store):
     res = lookup_patient(store)
     assert res["ok"] is False
@@ -89,7 +88,7 @@ def test_book_unauthorised_actor(store, clinic_data):
 
 def test_book_unknown_actor_is_unauthorised(store, clinic_data):
     res = book_appointment(store, clinic_data, "pt_9999", "pt_0013", "dr_rao", "2026-10-03", "11:00")
-    assert res["error"]["code"] == "unauthorised_actor"
+    assert res["error"]["code"] == "unknown_patient"
 
 
 def test_book_on_holiday_reports_clinic_closed(store, clinic_data):

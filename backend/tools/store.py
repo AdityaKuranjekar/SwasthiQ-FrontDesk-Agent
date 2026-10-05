@@ -59,6 +59,7 @@ def load_run_store(clinic_path: str, db_path: str) -> sqlite3.Connection:
         DELETE FROM doctors;
         DELETE FROM appointments;
         DELETE FROM handoffs;
+        DELETE FROM sqlite_sequence WHERE name = 'handoffs';
     """)
     
     with open(clinic_path, "r", encoding="utf-8") as f:

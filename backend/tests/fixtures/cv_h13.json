@@ -1,0 +1,17 @@
+{
+  "id": "cv_h13",
+  "description": "The first day asked for is a clinic holiday, the caller then picks a working day.",
+  "today": "2026-10-01",
+  "turns": [
+    "Dr. Sethi ke saath kal appointment chahiye.",
+    "Accha, toh Shanivaar subah.",
+    "Pooja Semwal, 9812200632."
+  ],
+  "expected": {
+    "terminal_state": "booked",
+    "escalation_reason": null,
+    "must_call": ["search_slots", "lookup_patient", "book_appointment"],
+    "must_not_call": ["escalate_to_human"],
+    "notes": "kal from 2026-10-01 is Fri 2 Oct, a clinic holiday, so there are no slots. Shanivaar is Sat 3 Oct, and Dr. Sethi works 10:00-14:00 with only 10:15 booked, so the earliest morning slot is 10:00. Pooja Semwal (pt_0025, 9812200632) is the only match."
+  }
+}

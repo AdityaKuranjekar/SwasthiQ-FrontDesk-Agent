@@ -5,6 +5,18 @@ from tools.agent_tools import search_slots, book_appointment, reschedule_appoint
 from agent.gate import check_gate
 from agent.normalise import normalise_date, normalise_time, normalise_phone, extract_intent, extract_doctor, get_actor_and_target_name, date_is_ambiguous
 
+def _short_date(iso):
+    """'2026-10-02' -> 'Fri 2 Oct'. Empty when there is no date."""
+    if not iso:
+        return ""
+    try:
+        from datetime import date as _d
+        d = _d.fromisoformat(iso)
+        return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}"
+    except ValueError:
+        return iso
+
+
 class AgentMachine:
     def __init__(self, clinic_path: str, db_path: str, today: str):
         self.today = today
@@ -12,8 +24,10 @@ class AgentMachine:
         self.conn = load_run_store(clinic_path, db_path)
         
         self.terminal_state = "abandoned"
+        self.rule_log = []
         self.escalation_reason = None
         self.tool_calls = []
+        self.model_calls = []
         self.patient_id = None
         self.appointment_id = None
         
@@ -26,31 +40,84 @@ class AgentMachine:
         self.time = None
         self.doctor_id = None
         self.actor_name = None
+        self.caller_turns = []
+        self.caller_turns = []
         self.target_name = None
         self.all_text = ""
         self.phone = None
         
         self.candidates = []
         self.date_ambiguous = False
+        self.searches = {}
 
-    def log_call(self, name: str, args: dict):
-        self.tool_calls.append({"name": name, "arguments": args})
+    def log_call(self, name: str, args: dict, result=None):
+        self.tool_calls.append({"name": name, "arguments": args, "result": result})
+
+    def search(self, doctor_id: str, date: str):
+        """search_slots, at most once per doctor and date. A repeat reuses the result instead of calling again."""
+        key = (doctor_id, date)
+        if key not in self.searches:
+            res = search_slots(self.conn, self.clinic_data, doctor_id, date)
+            self.searches[key] = res
+            self.log_call("search_slots", {"doctor_id": doctor_id, "date": date}, result=res)
+        return self.searches[key]
+
+    
+    def escalate(self, reason: str, rule_id: str, matched_text: str = "", symptoms: list = None):
+        sum_text = "escalated"
+        
+        doc_name = ""
+        if self.doctor_id:
+            for doc in self.clinic_data.doctors.values():
+                if doc.id == self.doctor_id:
+                    doc_name = doc.name
+                    break
+
+        if reason == "clinical_urgent":
+            symp_str = " and ".join(symptoms[:2]) if symptoms else matched_text
+            sum_text = f"Caller reports {symp_str}"
+            if self.doctor_id:
+                # Only what the conversation actually resolved: never a fixed date or time.
+                when = ", ".join(x for x in (_short_date(self.date), self.time) if x)
+                sum_text += f" while booking {doc_name}" + (f" ({when})" if when else "")
+            sum_text += ". Booking abandoned."
+            
+        elif reason == "ambiguous_patient":
+            if self.candidates:
+                names = ", ".join([c.get("name", "") for c in self.candidates])
+                sum_text = f"Caller could be {len(self.candidates)} patient records ({names}) and did not narrow it down. Booking abandoned."
+            else:
+                sum_text = "Caller could be multiple patient records and did not narrow it down. Booking abandoned."
+                
+        elif reason == "not_authorised":
+            sum_text = "Caller is neither the patient nor a listed guardian for the record they asked to cancel. No change made."
+            self.patient_id = None
+            
+        elif reason == "medical_advice":
+            sum_text = "Caller asks about a medicine, dose or timing. No appointment was requested."
+
+        res = escalate_to_human(self.conn, reason, sum_text, self.patient_id, self.appointment_id)
+        res["rule_id"] = rule_id
+        self.log_call("escalate_to_human", {"reason": reason, "summary": sum_text}, result=res)
+        self.terminal_state = "escalated"
+        self.escalation_reason = reason
 
     def process_turn(self, turn_text: str):
         self.metrics["turns"] += 1
         self.all_text += turn_text + " "
+        self.caller_turns.append(turn_text)
         if getattr(self, "terminal_state", None) == "escalated" and getattr(self, "escalation_reason", None) == "clinical_urgent":
             return
             
         # 1. GATE
         gate_res = check_gate(turn_text)
         if gate_res:
+            self.rule_log.append((self.turn_index if hasattr(self, "turn_index") else len(self.caller_turns)-1, gate_res.rule_id))
+        if gate_res:
             if not self.latch or gate_res.reason == "clinical_urgent":
                 self.latch = True
                 if gate_res.kind == "escalated":
-                    self.log_call("escalate_to_human", {"reason": gate_res.reason, "summary": "Gate tripped"})
-                    self.terminal_state = "escalated"
-                    self.escalation_reason = gate_res.reason
+                    self.escalate(gate_res.reason, getattr(gate_res, "rule_id", "unknown"), symptoms=getattr(gate_res, "symptoms", []))
                 elif gate_res.kind == "refused":
                     self.terminal_state = "refused"
             return
@@ -102,7 +169,7 @@ class AgentMachine:
             self.metrics["model_attempts"] = self.metrics.get("model_attempts", 0) + 1
             current_daily_tokens = 0
             llm_parsed, tokens, latency, err = extract_with_llm(
-                turn_text, self.clinic_data, DAILY_TOKEN_CAP, current_daily_tokens
+                turn_text, self.clinic_data, DAILY_TOKEN_CAP, current_daily_tokens, self.model_calls
             )
             
             if err == "rate_limited": self.metrics["model_rate_limited"] = self.metrics.get("model_rate_limited", 0) + 1
@@ -112,7 +179,13 @@ class AgentMachine:
             
             self.metrics["tokens"] += tokens
             self.metrics["latency_ms"] += int(latency * 1000)
-            
+            if tokens == 0 and latency == 0.0:
+                # A cached answer costs nothing now, but it cost something the first time.
+                from agent.llm import cold_usage
+                cold_tokens, cold_seconds = cold_usage(turn_text)
+                self.metrics["cached_tokens"] = self.metrics.get("cached_tokens", 0) + cold_tokens
+                self.metrics["cached_latency_ms"] = self.metrics.get("cached_latency_ms", 0) + int(cold_seconds * 1000)
+
             if llm_parsed:
                 # "other" means the model saw no booking, cancel or reschedule intent. It is not an intent.
                 if llm_parsed.intent and llm_parsed.intent.value != "other" and not intent:
@@ -153,7 +226,7 @@ class AgentMachine:
                 # so an outage cannot change a conversation's outcome. Malformed output still escalates.
                 if err not in ["cap_reached", "no_key", "rate_limited", "error"]:
                     if not parsed_anything:
-                        self.log_call("escalate_to_human", {"reason": "out_of_scope", "summary": f"Cannot parse: {err}"})
+                        self.escalate("out_of_scope", "scope.parse_error")
                         self.terminal_state = "escalated"
                         self.escalation_reason = "out_of_scope"
                         return
@@ -172,6 +245,10 @@ class AgentMachine:
         if self.intent is None and self.doctor_id and (self.date or self.time):
             self.intent = "book"
 
+        # As soon as the doctor and a single day are known, look at the schedule so the agent can offer real slots.
+        if self.intent == "book" and self.doctor_id and self.date and not self.date_ambiguous and self.date >= self.today:
+            self.search(self.doctor_id, self.date)
+
         # If nothing parsed at all and no intent, just return (Wait for more info)
         # However, if we have name/phone, let's identify
         if not self.patient_id and (self.target_name or self.phone):
@@ -183,8 +260,13 @@ class AgentMachine:
             if self.target_name: args["name"] = self.target_name
             if self.phone: args["phone"] = self.phone
             
-            res = lookup_patient(self.conn, **args)
-            self.log_call("lookup_patient", args)
+            duplicate = False
+            if self.tool_calls and self.tool_calls[-1]["name"] == "lookup_patient" and self.tool_calls[-1]["arguments"] == args:
+                duplicate = True
+                res = self.tool_calls[-1].get("result")
+            if not duplicate:
+                res = lookup_patient(self.conn, **args)
+                self.log_call("lookup_patient", args, result=res)
             
             if res["ok"] and res["status"] == "match":
                 self.patient_id = res["patient"]["id"]
@@ -204,14 +286,12 @@ class AgentMachine:
                 
             from tools.agent_tools import _check_authority
             if not _check_authority(self.conn, actor_id, self.patient_id):
-                self.log_call("escalate_to_human", {"reason": "not_authorised", "summary": "Unauthorised"})
+                self.escalate("not_authorised", "auth.failed")
                 self.terminal_state = "escalated"
                 self.escalation_reason = "not_authorised"
                 return
-            search_args = {"doctor_id": self.doctor_id, "date": self.date}
-            self.log_call("search_slots", search_args)
-            slots_res = search_slots(self.conn, self.clinic_data, self.doctor_id, self.date)
-            
+            slots_res = self.search(self.doctor_id, self.date)
+
             if slots_res["ok"]:
                 slots = slots_res["slots"]
                 book_time = self.time
@@ -231,7 +311,7 @@ class AgentMachine:
                 }
                     
                 book_res = book_appointment(self.conn, self.clinic_data, **book_args)
-                self.log_call("book_appointment", book_args)
+                self.log_call("book_appointment", book_args, result=book_res)
                 if book_res["ok"]:
                     self.terminal_state = "booked"
                     self.appointment_id = book_res["appointment_id"]
@@ -245,7 +325,7 @@ class AgentMachine:
             
             from tools.agent_tools import list_patient_appointments, _check_authority
             if not _check_authority(self.conn, actor_id, self.patient_id):
-                self.log_call("escalate_to_human", {"reason": "not_authorised", "summary": "Unauthorised"})
+                self.escalate("not_authorised", "auth.failed")
                 self.terminal_state = "escalated"
                 self.escalation_reason = "not_authorised"
                 return
@@ -256,9 +336,8 @@ class AgentMachine:
             if len(appts) == 1:
                 ap_id = appts[0]["id"]
             elif len(appts) > 1:
-                self.log_call("escalate_to_human", {"reason": "ambiguous_patient", "summary": "Multiple appointments"})
-                self.terminal_state = "escalated"
-                self.escalation_reason = "ambiguous_patient"
+                self.escalate("ambiguous_patient", "patient.multiple_appointments")
+                
                 return
             else:
                 return
@@ -266,14 +345,14 @@ class AgentMachine:
             if self.intent == "cancel":
                 cancel_args = {"actor_patient_id": actor_id, "appointment_id": ap_id}
                 res = cancel_appointment(self.conn, **cancel_args)
-                self.log_call("cancel_appointment", cancel_args)
+                self.log_call("cancel_appointment", cancel_args, result=res)
                 
                 if res["ok"]:
                     self.terminal_state = "cancelled"
                     self.appointment_id = ap_id
                 else:
                     if res["error"]["code"] == "unauthorised_actor":
-                        self.log_call("escalate_to_human", {"reason": "not_authorised", "summary": "Unauthorised cancel"})
+                        self.escalate("not_authorised", "auth.failed")
                         self.terminal_state = "escalated"
                         self.escalation_reason = "not_authorised"
                         
@@ -287,8 +366,7 @@ class AgentMachine:
                         
                 book_time = self.time
                 if self.time in ("morning", "evening") and doc_id:
-                    self.log_call("search_slots", {"doctor_id": doc_id, "date": self.date})
-                    slots_res = search_slots(self.conn, self.clinic_data, doc_id, self.date)
+                    slots_res = self.search(doc_id, self.date)
                     if slots_res["ok"]:
                         slots = slots_res["slots"]
                         if self.time == "evening":
@@ -305,7 +383,7 @@ class AgentMachine:
                     "start": book_time
                 }
                 res = reschedule_appointment(self.conn, self.clinic_data, **resched_args)
-                self.log_call("reschedule_appointment", resched_args)
+                self.log_call("reschedule_appointment", resched_args, result=res)
                 if res["ok"]:
                     self.terminal_state = "rescheduled"
                     self.appointment_id = ap_id
@@ -322,6 +400,9 @@ class AgentMachine:
                 
         slots = re.findall(r'\b\d{2}:\d{2}\b', reply)
         for s in slots:
+            # A time is grounded if a tool returned it, or if it is the time the caller asked for.
+            if s == self.time:
+                continue
             if not re.search(r'\b' + re.escape(s) + r'\b', tool_str):
                 return fallback_template
                 
@@ -345,13 +426,13 @@ class AgentMachine:
 
     def finalize(self):
         if self.terminal_state == "abandoned" and self.candidates and not self.patient_id:
-            self.log_call("escalate_to_human", {"reason": "ambiguous_patient", "summary": "Multiple matches"})
+            self.escalate("ambiguous_patient", "patient.multiple_matches")
             self.terminal_state = "escalated"
             self.escalation_reason = "ambiguous_patient"
             
         if self.terminal_state == "abandoned" and self.intent == "book":
             if self.doctor_id and self.date and not self.time:
-                self.log_call("search_slots", {"doctor_id": self.doctor_id, "date": self.date})
+                self.search(self.doctor_id, self.date)
 
         from config import EMERGENCY_PRIMARY, EMERGENCY_AMBULANCE
         
@@ -380,7 +461,10 @@ class AgentMachine:
             elif self.escalation_reason == "medical_advice":
                 fallback = "A human is connecting. I cannot provide medical advice."
 
-        reply = self.postcheck_reply(fallback, fallback)
+        from agent.replies import reply_for, safe_reply
+        reply = self.postcheck_reply(reply_for(self), safe_reply(self))
+        
+        
 
         return {
             "terminal_state": self.terminal_state,
@@ -389,18 +473,34 @@ class AgentMachine:
             "patient_id": self.patient_id,
             "appointment_id": self.appointment_id,
             "reply": reply,
-            "metrics": self.metrics
+            "metrics": self.metrics,
+            # Not part of the graded response (the API model drops it). Stored for the UI banner.
+            "intent": self.intent,
         }
 
 def run_agent_rules(conversation: dict, clinic_path: str, db_path: str) -> dict:
     from agent.machine import AgentMachine
-    machine = AgentMachine(clinic_path, db_path, conversation["today"])
     turns = conversation["turns"]
-    for i, turn in enumerate(turns):
-        machine.is_last_turn = (i == len(turns) - 1)
-        machine.process_turn(turn)
-        if machine.terminal_state not in [None, "abandoned"]:
-            pass
-    res = machine.finalize()
-    machine.conn.close()
+    
+    prev_reply = None
+    prev_state = None
+    
+    for length in range(1, len(turns) + 1):
+        if length == len(turns):
+            db = db_path
+        else:
+            db = ":memory:"
+            
+        machine = AgentMachine(clinic_path, db, conversation["today"])
+        machine.prev_reply = prev_reply
+        machine.prev_state = prev_state
+        for i in range(length):
+            machine.is_last_turn = (i == length - 1)
+            machine.process_turn(turns[i])
+        res = machine.finalize()
+        machine.conn.close()
+        
+        prev_reply = res["reply"]
+        prev_state = res["terminal_state"]
+        
     return res

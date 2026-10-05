@@ -1,0 +1,30 @@
+[
+  {
+    "conversation_id": "cv_4471",
+    "caller_said": "Seene mein dard ho raha hai",
+    "escalation_reason": "clinical_urgent",
+    "created_at": "2026-10-04T06:12:00Z",
+    "resolved": 0
+  },
+  {
+    "conversation_id": "cv_4468",
+    "caller_said": "Cancel for a different patient",
+    "escalation_reason": "not_authorised",
+    "created_at": "2026-10-04T05:50:00Z",
+    "resolved": 0
+  },
+  {
+    "conversation_id": "cv_4463",
+    "caller_said": "Sharma ji ke liye - 3 matches",
+    "escalation_reason": "ambiguous_patient",
+    "created_at": "2026-10-04T05:27:00Z",
+    "resolved": 0
+  },
+  {
+    "conversation_id": "cv_4455",
+    "caller_said": "Ye dawai lun ya nahi?",
+    "escalation_reason": "medical_advice",
+    "created_at": "2026-10-04T04:48:00Z",
+    "resolved": 0
+  }
+]
